@@ -1,7 +1,7 @@
-var async = require('async');
-var fs = require('fs');
-var path = require('path');
-var Events = require('events');
+var async = require('async'),
+	fs = require('fs'),
+	path = require('path'),
+	Events = require('events');
 
 // module.exports for all loaded modules is here
 var loaded = {};
@@ -19,6 +19,7 @@ var hotswap = {};
 var watchfiles = true;
 var watchfilenames = {};
 var autoreload = true;
+var watchMode = fs.watch;
 
 // asynchronously loaded file contents
 var fscache = {};
@@ -64,7 +65,11 @@ function restore_extension(ext)
 function read_file_failsafe(filename, cb)
 {
 	if (watchfilenames[filename]) {
-		watchfilenames[filename].close();
+		try {
+			watchfilenames[filename].close();
+		} catch(_) {
+			fs.unwatchFile(filename);
+		}
 		delete watchfilenames[filename];
 	}
 	try_read_file(filename, function(err, data) {
@@ -136,7 +141,7 @@ function copy_object(dest, src)
 	for (var k in src) {
 		var getter = src.__lookupGetter__(k);
 		var setter = src.__lookupSetter__(k);
-	
+
 		if (getter || setter) {
 			if (getter)
 				dest.__defineGetter__(k, getter);
@@ -146,7 +151,7 @@ function copy_object(dest, src)
 			dest[k] = src[k];
 		}
 	}
-	if (src.prototype != undefined) {
+	if (src.prototype !== undefined) {
 		dest.prototype = src.prototype;
 	} else {
 		delete dest.prototype;
@@ -162,12 +167,12 @@ function new_code(filename, newmodule)
 		loaded_funcs[filename] = newexp;
 		loaded[filename] = function() {
 			return loaded_funcs[filename].apply(this, arguments);
-		}
+		};
 	}
 
 	var actual = loaded[filename];
 	copy_object(actual, newexp);
-	
+
 	require.cache[filename].exports = actual;
 }
 
@@ -206,7 +211,7 @@ function extension_js(type, module, filename)
 	var content = get_file_contents(filename);
 	delete fscache[filename];
 	var iscompiled = false;
-	
+
 	fs.stat(filename, function(err, stats) {
 		hotswap[filename] = stats.mtime;
 	});
@@ -301,33 +306,32 @@ function reload(cb)
 // change extension list and return new list
 function extensions(list)
 {
+	var res = {}, i, hash = {}, arg;
+
 	if (list === undefined) {
-		var res = {};
-		for (var i in current_extensions) res[i] = current_extensions[i];
+		for (i in current_extensions) res[i] = current_extensions[i];
 		return res;
 	}
 
 	if (typeof(list) == "string") {
-		var hash = {};
 		hash[list] = 'js';
 		return extensions.call(this, hash);
 	}
 
 	if (typeof(list) != "object") throw new Error('type error');
 	if (list instanceof Array) {
-		var hash = {};
 		list.forEach(function(x) {
 			hash[x] = 'js';
 		});
 		return extensions.call(this, hash);
 	}
-	
+
 	var _extensions_copy = {};
-	for (var arg in current_extensions) {
+	for (arg in current_extensions) {
 		_extensions_copy[arg] = current_extensions[arg];
 	}
 
-	for (var arg in list) {
+	for (arg in list) {
 		if (_extensions_copy[arg] != list[arg]) {
 			restore_extension(arg);
 			delete _extensions_copy[arg];
@@ -337,22 +341,21 @@ function extensions(list)
 		}
 		delete _extensions_copy[arg];
 	}
-	
-	for (var arg in _extensions_copy) {
+
+	for (arg in _extensions_copy) {
 		if (_extensions_copy[arg]) {
 			restore_extension(arg);
 		}
 	}
 
-	var res = {};
-	for (var i in current_extensions) res[i] = current_extensions[i];
+	for (i in current_extensions) res[i] = current_extensions[i];
 	return res;
 }
 
 // here should be function to trigger code changing
 function watch_file(filename)
 {
-	var w = fs.watch(filename, {persistent: false}, function() {
+	var w = watchMode(filename, {persistent: false}, function() {
 		emitter.emit('change', filename);
 		if (autoreload) {
 			reload_file_force(filename);
@@ -403,6 +406,7 @@ function configure(hash)
 	result.extensions = extensions(hash.extensions);
 	result.watch = setwatch(hash.watch);
 	result.autoreload = autoreload;
+	result.watchMode = watchMode = (hash.watchMode === undefined) ? fs.watch : fs.watchFile;
 	return result;
 }
 
@@ -412,9 +416,8 @@ configure({
 	watch: true,
 	autoreload: true,
 });
-	
+
 module.exports = emitter;
 emitter.swap = reload;
 emitter.configure = configure;
 emitter.require = require_force;
-
