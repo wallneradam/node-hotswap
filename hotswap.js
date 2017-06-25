@@ -213,7 +213,7 @@ function extension_js(type, module, filename)
 	var iscompiled = false;
 
 	fs.stat(filename, function(err, stats) {
-		hotswap[filename] = stats.mtime;
+		hotswap[filename] = stats ? stats.mtime : 0;
 	});
 
 	if (type == 'coffee') {
